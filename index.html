@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Manage_Employees</title>
+  <style>
+    body {
+      font-family: 'Arial', sans-serif;
+      background-color: #f4f4f4;
+      margin: 0;
+      padding: 0;
+    }
+
+    header {
+      background-color: #333;
+      color: #fff;
+      padding: 10px;
+      text-align: center;
+      font-size: 24px;
+    }
+
+    main {
+      max-width: 800px;
+      margin: 20px auto;
+      background-color: #fff;
+      padding: 20px;
+      box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+    }
+
+    table {
+      border-collapse: collapse;
+      width: 100%;
+    }
+
+    th, td {
+      border: 1px solid #ddd;
+      padding: 10px;
+      text-align: left;
+    }
+
+    th {
+      background-color: #4CAF50;
+      color: white;
+      cursor: pointer;
+    }
+
+    .pagination {
+      display: flex;
+      list-style: none;
+      margin: 10px 0;
+      padding: 0;
+    }
+
+    .pagination li {
+      margin-right: 5px;
+    }
+
+    .pagination a {
+      text-decoration: none;
+      padding: 5px 10px;
+      background-color: #f2f2f2;
+      color: #333;
+      border: 1px solid #ddd;
+      cursor: pointer;
+    }
+
+    .pagination a:hover {
+      background-color: #ddd;
+    }
+
+    .pagination .first-last {
+      margin-right: 10px;
+    }
+
+    #deleteButton,
+    #editModal,
+    #searchBar {
+      margin-bottom: 10px;
+      padding: 10px;
+    }
+
+    #deleteButton,
+    #editModal,
+    #selectAll {
+      background-color: #ff6347;
+      color: #fff;
+      border: none;
+      cursor: pointer;
+      padding: 10px;
+    }
+
+    #editModal {
+      display: none;
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      padding: 20px;
+      background-color: #fff;
+      z-index: 1;
+      box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+    }
+
+    /* Style for selected rows */
+    #myTable tbody tr.selected {
+      background-color: #d3d3d3;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  Member Management
+</header>
+
+<main>
+  <div>
+    <input type="text" id="searchBar" oninput="searchTable()" placeholder="Search...">
+  </div>
+
+  <button id="deleteButton" onclick="deleteSelectedRows()">Delete Selected</button>
+
+  <table id="myTable">
+    <thead>
+      <tr>
+        <th><input type="checkbox" id="selectAll" onclick="selectAllRows()"></th>
+        <th onclick="sortTable(0)">ID</th>
+        <th onclick="sortTable(1)">Name</th>
+        <th onclick="sortTable(2)">Email</th>
+        <th onclick="sortTable(3)">Role</th>
+        <th>Edit</th>
+        <th>Delete</th>
+      </tr>
+    </thead>
+    <tbody id="tableBody">
+      <!-- Rows will be dynamically added here -->
+    </tbody>
+  </table>
+
+  <ul class="pagination" id="pagination"></ul>
+
+  <div id="editModal">
+    <h2>Edit Entry</h2>
+    <form id="editForm">
+      <label for="editName">Name:</label>
+      <input type="text" id="editName" name="editName" required><br>
+
+      <label for="editEmail">Email:</label>
+      <input type="email" id="editEmail" name="editEmail" required><br>
+
+      <label for="editRole">Role:</label>
+      <input type="text" id="editRole" name="editRole" required><br>
+
+      <input type="button" value="Save" onclick="saveEdit()">
+      <input type="button" value="Cancel" onclick="closeEditModal()">
+    </form>
+  </div>
+</main>
+
+<script>
+  var entriesPerPage = 10;
+  var currentPage = 1;
+  var totalEntries = 0;
+  var editingRowIndex;
+  var apiData = [];
+  var selectedRows = new Set();
+
+  function fetchData() {
+    return fetch('https://geektrust.s3-ap-southeast-1.amazonaws.com/adminui-problem/members.json')
+      .then(response => response.json())
+      .catch(error => console.error('Error fetching data:', error));
+  }
+
+  function saveDataToLocal(data) {
+    localStorage.setItem('apiData', JSON.stringify(data));
+  }
+
+  function deleteRow(row) {
+  var rowIndex = row.rowIndex - 1 + (currentPage - 1) * entriesPerPage;
+
+  // Remove the row from the selectedRows set if it was selected
+  if (row.classList.contains('selected')) {
+    row.classList.remove('selected'); // Remove the 'selected' class
+    selectedRows.delete(row);
+  }
+
+  // Remove the row from the local memory
+  apiData.splice(rowIndex, 1);
+  totalEntries--;
+
+  // If the current page becomes empty after deletion and it's not the first page, go to the previous page
+  if ((currentPage - 1) * entriesPerPage >= totalEntries && currentPage > 1) {
+    currentPage--;
+  }
+
+  // Updating pagination after deletion
+  generatePagination();
+
+  // Updating the table when no more entries are available
+  updateTable(currentPage);
+}
+function selectAllRows() {
+  var checkboxes = document.querySelectorAll('#myTable tbody input[type="checkbox"]');
+  var selectAllCheckbox = document.getElementById('selectAll');
+
+  checkboxes.forEach(function (checkbox) {
+    checkbox.checked = selectAllCheckbox.checked;
+
+    var row = checkbox.closest('tr');
+    if (selectAllCheckbox.checked) {
+      selectedRows.add(row);
+      row.classList.add('selected');
+    } else {
+      selectedRows.delete(row);
+      row.classList.remove('selected');
+    }
+  });
+
+  // Update the selection on all pages
+  var tableRows = document.querySelectorAll('#myTable tbody tr');
+  tableRows.forEach(function (row) {
+    selectRow(row);
+  });
+}
+
+function deleteSelectedRows() {
+  var checkboxes = document.querySelectorAll('#myTable tbody input[type="checkbox"]');
+  var rowsToDelete = [];
+
+  checkboxes.forEach(function (checkbox) {
+    if (checkbox.checked) {
+      var row = checkbox.closest('tr');
+      rowsToDelete.push(row);
+    }
+  });
+
+  // Delete the selected rows
+  rowsToDelete.forEach(function (row) {
+    deleteRow(row);
+  });
+
+  // Clear the selectedRows Set and uncheck the "Select All" checkbox
+  selectedRows.clear();
+  document.getElementById('selectAll').checked = false;
+
+  // After deletion, update the table on the current page
+  updateTable(currentPage);
+}
+
+
+  function sortTable(columnIndex) {
+    apiData.sort((a, b) => {
+      var colA = a[Object.keys(a)[columnIndex]];
+      var colB = b[Object.keys(b)[columnIndex]];
+
+      if (colA < colB) return -1;
+      if (colA > colB) return 1;
+      return 0;
+    });
+
+    updateTable(currentPage);
+  }
+
+  function updateTable(pageNumber) {
+    var startIndex = (pageNumber - 1) * entriesPerPage;
+    var endIndex = startIndex + entriesPerPage;
+    var tableBody = document.getElementById("tableBody");
+    tableBody.innerHTML = "";
+
+    for (var i = startIndex; i < Math.min(endIndex, apiData.length); i++) {
+      var row = tableBody.insertRow();
+      row.onclick = function () {
+        selectRow(this);
+      };
+
+      var cell1 = row.insertCell(0);
+      var cell2 = row.insertCell(1);
+      var cell3 = row.insertCell(2);
+      var cell4 = row.insertCell(3);
+      var cell5 = row.insertCell(4);
+      var cell6 = row.insertCell(5);
+      var cell7 = row.insertCell(6);
+
+      // Adding checkbox to the first cell
+      cell1.innerHTML = '<input type="checkbox">';
+      cell2.innerHTML = apiData[i].id;
+      cell3.innerHTML = apiData[i].name;
+      cell4.innerHTML = apiData[i].email;
+      cell5.innerHTML = apiData[i].role;
+      cell6.innerHTML = '<button onclick="editRow(' + i + ')">Edit</button>';
+      cell7.innerHTML = '<button onclick="deleteRow(this.parentNode.parentNode)">Delete</button>';
+    }
+
+    
+    if (endIndex > apiData.length && currentPage > 1) {
+      currentPage--;
+      generatePagination();
+    } else {
+      totalEntries = apiData.length;
+      generatePagination();
+    }
+  }
+
+  function generatePagination() {
+    var pagination = document.getElementById("pagination");
+    pagination.innerHTML = "";
+
+    var totalPages = Math.ceil(totalEntries / entriesPerPage);
+
+    var firstPageButton = document.createElement("li");
+    firstPageButton.innerHTML = '<a class="first-last" href="#" onclick="updateTable(1)">First Page</a>';
+    pagination.appendChild(firstPageButton);
+
+    for (var i = 1; i <= totalPages; i++) {
+      var li = document.createElement("li");
+      var a = document.createElement("a");
+      a.textContent = i;
+      a.href = "#";
+      a.onclick = function () {
+        currentPage = parseInt(this.textContent);
+        updateTable(currentPage);
+      };
+
+      li.appendChild(a);
+      pagination.appendChild(li);
+    }
+
+    var lastPageButton = document.createElement("li");
+    lastPageButton.innerHTML = '<a class="first-last" href="#" onclick="updateTable(' + totalPages + ')">Last Page</a>';
+    pagination.appendChild(lastPageButton);
+  }
+
+  function editRow(index) {
+    editingRowIndex = index;
+
+    // Populating the edit form with the current data
+    document.getElementById('editName').value = apiData[index].name;
+    document.getElementById('editEmail').value = apiData[index].email;
+    document.getElementById('editRole').value = apiData[index].role;
+
+    // Displaying the edit modal
+    document.getElementById('editModal').style.display = 'block';
+  }
+
+  function saveEdit() {
+    // Updating the data with the edited values
+    apiData[editingRowIndex].name = document.getElementById('editName').value;
+    apiData[editingRowIndex].email = document.getElementById('editEmail').value;
+    apiData[editingRowIndex].role = document.getElementById('editRole').value;
+
+    // Saving data to local storage
+    saveDataToLocal(apiData);
+
+    // Closing the edit modal
+    closeEditModal();
+
+    // Updating the table with the edited data
+    updateTable(currentPage);
+  }
+
+  function closeEditModal() {
+    // Close the edit modal
+    document.getElementById('editModal').style.display = 'none';
+  }
+
+
+  function selectRow(row) {
+  var checkbox = row.querySelector('input[type="checkbox"]');
+  if (checkbox.checked) {
+    row.classList.add('selected');
+    selectedRows.add(row);
+  } else {
+    row.classList.remove('selected');
+    selectedRows.delete(row);
+  }
+}
+
+
+ function searchTable() {
+  var input, filter, table, tr, td, i, j, txtValue;
+  input = document.getElementById("searchBar");
+  filter = input.value.toUpperCase();
+  table = document.getElementById("myTable");
+  tr = table.getElementsByTagName("tr");
+
+  for (i = 0; i < tr.length; i++) {
+    var found = false;
+    for (j = 1; j < tr[i].cells.length; j++) {
+      td = tr[i].getElementsByTagName("td")[j];
+      if (td) {
+        txtValue = td.textContent || td.innerText;
+        if (txtValue.toUpperCase().indexOf(filter) > -1) {
+          found = true;
+          break;
+        }
+      }
+    }
+    if (found) {
+      tr[i].style.display = "";
+    } else {
+      tr[i].style.display = "none";
+    }
+  }
+}
+
+
+  // Fetching initial data from the API when the page loads
+  window.onload = function () {
+    // Checking if data is already in local storage
+    if (!apiData.length) {
+      fetchData().then(data => {
+        apiData = data;
+        saveDataToLocal(apiData);
+        totalEntries = apiData.length;
+
+        // Initializing table and pagination with the retrieved data
+        updateTable(currentPage);
+        generatePagination();
+      });
+    } else {
+      totalEntries = apiData.length;
+
+      // Initializing table and pagination with the stored data
+      updateTable(currentPage);
+      generatePagination();
+    }
+  };
+</script>
+
+</body>
+</html>
